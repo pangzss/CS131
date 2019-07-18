@@ -1,4 +1,4 @@
-#!/home/shawn/Documents/cs131/CS131_release/hw7_release/.env/bin/python3
+#!/home/shawn/Documents/CS131/CS131/hw7_release/.env/bin/python3
 from __future__ import print_function
 import base64
 import os

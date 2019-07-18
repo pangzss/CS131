@@ -1,4 +1,4 @@
-#!/home/shawn/Documents/cs131/CS131_release/hw7_release/.env/bin/python3
+#!/home/shawn/Documents/CS131/CS131/hw7_release/.env/bin/python3
 """PILdriver, an image-processing calculator using PIL.
 
 An instance of class PILDriver is essentially a software stack machine
