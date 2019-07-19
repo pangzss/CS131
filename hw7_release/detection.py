@@ -21,7 +21,7 @@ def hog_feature(image, pixel_per_cell = 8):
         hogImage: an image representation of hog provided by skimage.
     """
     ### YOUR CODE HERE
-    hogFeature, hogImage = feature.hog(image,pixels_per_cell=(8, 8),visualise=True)
+    hogFeature, hogImage = feature.hog(image,pixels_per_cell=(pixel_per_cell,pixel_per_cell),visualise=True)
     ### END YOUR CODE
     return (hogFeature, hogImage)
 
@@ -57,14 +57,67 @@ def sliding_window(image, base_score, stepSize, windowSize, pixel_per_cell=8):
         for j in range(W//stepSize+1):
             iIm = i*stepSize
             jIm = j*stepSize
-            imgFeature,_ = hog_feature(pad_image[iIm:iIm+winH,jIm:jIm+winW])
+            imgFeature,_ = hog_feature(pad_image[iIm:iIm+winH,jIm:jIm+winW],pixel_per_cell)
             response_map[i,j] = np.dot(base_score,imgFeature)
+            
+    response_map = resize(response_map, (H,W))
+    max_idx = np.argmax(response_map)
     max_score = np.max(response_map.reshape(-1))
+    nonzero_idxs = np.nonzero(response_map == max_score)
+    maxr = nonzero_idxs[0][0]-winH//2
+    maxc = nonzero_idxs[1][0]-winW//2
+   # max_idx = np.where(response_map == )
     ### END YOUR CODE
 
 
     return (max_score, maxr, maxc, response_map)
 
+def sliding_window_fast(image, base_score, stepSize, windowSize, pixel_per_cell=8):
+    """ A sliding window that checks each different location in the image,
+        and finds which location has the highest hog score. The hog score is computed
+        as the dot product between hog feature of the sliding window and the hog feature
+        of the template. It generates a response map where each location of the
+        response map is a corresponding score. And you will need to resize the response map
+        so that it has the same shape as the image.
+
+    Hint: use the resize function provided by skimage.
+
+    Args:
+        image: an np array of size (h,w).
+        base_score: hog representation of the object you want to find, an array of size (m,).
+        stepSize: an int of the step size to move the window.
+        windowSize: a pair of ints that is the height and width of the window.
+    Returns:
+        max_score: float of the highest hog score.
+        maxr: int of row where the max_score is found (top-left of window).
+        maxc: int of column where the max_score is found (top-left of window).
+        response_map: an np array of size (h,w).
+    """
+    # slide a window across the image
+    (max_score, maxr, maxc) = (0,0,0)
+    winH, winW = windowSize
+    H,W = image.shape
+    pad_image = np.lib.pad(image, ((winH//2,winH-winH//2),(winW//2, winW-winW//2)), mode='constant')
+    response_map = np.zeros((H//stepSize+1, W//stepSize+1))
+    ### YOUR CODE HERE
+    for i in range(H//stepSize+1):
+        for j in range(W//stepSize+1):
+            iIm = i*stepSize
+            jIm = j*stepSize
+            imgFeature,_ = hog_feature(pad_image[iIm:iIm+winH,jIm:jIm+winW],pixel_per_cell)
+            response_map[i,j] = np.dot(base_score,imgFeature)
+            
+    response_map = resize(response_map, (H,W))
+    max_idx = np.argmax(response_map)
+    max_score = np.max(response_map.reshape(-1))
+    nonzero_idxs = np.nonzero(response_map == max_score)
+    maxr = nonzero_idxs[0][0]-winH//2
+    maxc = nonzero_idxs[1][0]-winW//2
+   # max_idx = np.where(response_map == )
+    ### END YOUR CODE
+
+
+    return (max_score, maxr, maxc, response_map)
 
 def pyramid(image, scale=0.9, minSize=(200, 100)):
     """
@@ -88,9 +141,15 @@ def pyramid(image, scale=0.9, minSize=(200, 100)):
     images = []
     current_scale = 1.0
     images.append((current_scale, image))
+    
     # keep looping over the pyramid
     ### YOUR CODE HERE
-    pass
+    H,W = image.shape
+    while H > 200 and W > 100:
+        current_scale = current_scale*scale
+        scaled = rescale(image,current_scale)
+        H,W = scaled.shape
+        images.append((current_scale, scaled))
     ### END YOUR CODE
     return images
 
@@ -117,7 +176,27 @@ def pyramid_score(image,base_score, shape, stepSize=20, scale = 0.9, pixel_per_c
     max_response_map =np.zeros(image.shape)
     images = pyramid(image, scale)
     ### YOUR CODE HERE
-    pass
+    scores = []
+    rows = []
+    cols = []
+    rmaps = []
+    scales = []
+    for cell in images:
+        current_scale = cell[0]
+        current_image = cell[1]
+        score, r, c, rmap = sliding_window(current_image, base_score, stepSize, shape, pixel_per_cell)
+        scores.append(score)
+        rows.append(r)
+        cols.append(c)
+        rmaps.append(rmap)
+        scales.append(current_scale)
+        
+    max_idx          = np.argmax(np.array(scores))
+    max_score        = scores[max_idx]
+    maxr             = rows[max_idx]
+    maxc             = cols[max_idx]
+    max_scale        = scales[max_idx]
+    max_response_map = rmaps[max_idx]
     ### END YOUR CODE
     return max_score, maxr, maxc, max_scale, max_response_map
 
@@ -143,7 +222,11 @@ def compute_displacement(part_centers, face_shape):
     """
     d = np.zeros((part_centers.shape[0],2))
     ### YOUR CODE HERE
-    pass
+    face_center = np.array(face_shape)//2
+    d = face_center - part_centers
+    mu = (np.mean(d,axis = 0,dtype=int))
+    sigma = np.std(d,axis = 0)
+ 
     ### END YOUR CODE
     return mu, sigma
 
@@ -161,7 +244,8 @@ def shift_heatmap(heatmap, mu):
             new_heatmap: np array of (h,w).
     """
     ### YOUR CODE HERE
-    pass
+    normalized = (heatmap - np.mean(heatmap))/np.std(heatmap)
+    new_heatmap = interpolation.shift(normalized, mu)
     ### END YOUR CODE
     return new_heatmap
 
@@ -181,7 +265,18 @@ def gaussian_heatmap(heatmap_face, heatmaps, sigmas):
         new_image: an image np array of (h,w) after gaussian convoluted.
     """
     ### YOUR CODE HERE
-    pass
+    H,W = heatmap_face.shape
+    heatmap = heatmap_face
+    for i,sigma in enumerate(sigmas):
+        filtered = gaussian(heatmaps[i], sigma) 
+        heatmap += filtered
+    
+    heatmap = (heatmap - np.mean(heatmap))/np.std(heatmap)
+    
+    max_score = np.max(heatmap.reshape(-1))
+    nonzero_idxs = np.nonzero(heatmap == max_score)
+    r = nonzero_idxs[0][0]
+    c = nonzero_idxs[1][0]
     ### END YOUR CODE
     return heatmap, r , c
 
