@@ -11,6 +11,7 @@ import numpy as np
 from skimage.transform import pyramid_gaussian
 from skimage.filters import sobel_h, sobel_v, gaussian
 from skimage.feature import corner_harris, corner_peaks
+from scipy.ndimage.filters import convolve
 
 def lucas_kanade(img1, img2, keypoints, window_size=5):
     """ Estimate flow vector at each keypoint using Lucas-Kanade method.
@@ -38,7 +39,7 @@ def lucas_kanade(img1, img2, keypoints, window_size=5):
     # Compute partial derivatives
     Iy, Ix = np.gradient(img1)
     It = img2 - img1
-
+    
     # For each [y, x] in keypoints, estimate flow vector [vy, vx]
     # using Lucas-Kanade method and append it to flow_vectors.
     for y, x in keypoints:
@@ -49,11 +50,21 @@ def lucas_kanade(img1, img2, keypoints, window_size=5):
         y, x = int(round(y)), int(round(x))
 
         ### YOUR CODE HERE
-        pass
+        pat_Iy = Iy[y-w:y+w+1,x-w:x+w+1].reshape((window_size**2,1))
+        pat_Ix = Ix[y-w:y+w+1,x-w:x+w+1].reshape((window_size**2,1))
+        
+        A = np.hstack((pat_Ix,pat_Iy))
+        
+        b = It[y-w:y+w+1,x-w:x+w+1].reshape((window_size**2,1))
+        
+        v = np.linalg.multi_dot([np.linalg.inv(np.dot(A.T,A)), A.T, b]).flatten()
+
+        flow_vectors.append(v[:])
+        
         ### END YOUR CODE
-
+   
     flow_vectors = np.array(flow_vectors)
-
+    
     return flow_vectors
 
 def iterative_lucas_kanade(img1, img2, keypoints,
@@ -84,10 +95,18 @@ def iterative_lucas_kanade(img1, img2, keypoints,
 
     flow_vectors = []
     w = window_size // 2
+    window = np.ones((window_size, window_size))
 
     # Compute spatial gradients
-    Iy, Ix = np.gradient(img1)
-
+    dy, dx = np.gradient(img1)
+    
+    dx2 = dx**2
+    dy2 = dy**2
+    dxdy = dx*dy
+    dx2_conv = convolve(dx2,window)
+    dy2_conv = convolve(dy2,window)
+    dxdy_conv = convolve(dxdy,window)
+    
     for y, x, gy, gx in np.hstack((keypoints, g)):
         v = np.zeros(2) # Initialize flow vector as zero vector
         y1 = int(round(y)); x1 = int(round(x))
@@ -95,7 +114,11 @@ def iterative_lucas_kanade(img1, img2, keypoints,
 
         # TODO: Compute inverse of G at point (x1, y1)
         ### YOUR CODE HERE
-        pass
+        G = np.array([
+                           [dx2_conv[y1,x1],dxdy_conv[y1,x1]],
+                           [dxdy_conv[y1,x1],dy2_conv[y1,x1]]
+                         ])
+        G_inv = np.linalg.inv(G)
         ### END YOUR CODE
 
         # iteratively update flow vector
@@ -106,11 +129,23 @@ def iterative_lucas_kanade(img1, img2, keypoints,
 
             # TODO: Compute bk and vk = inv(G) x bk
             ### YOUR CODE HERE
-            pass
+           # print(img2.shape,y2-w,y2+w+1,x2-w,x2+w+1)
+            H,W = img2.shape
+            if y2-w<0 or y2+w+1>H or x2-w<0 or x2+w+1>W:
+                continue
+            delta_dk = img1[y1-w:y1+w+1,x1-w:x1+w+1] - img2[y2-w:y2+w+1,x2-w:x2+w+1]
+            pat_dx   = dx[y1-w:y1+w+1,x1-w:x1+w+1]
+            pat_dy   = dy[y1-w:y1+w+1,x1-w:x1+w+1]
+            bk1      = np.sum(delta_dk * pat_dx)
+            bk2      = np.sum(delta_dk * pat_dy)
+            bk       = np.array([ [bk1],
+                                  [bk2] ])
+            vk = np.dot(G_inv,bk)
+            #print(vk.shape)
             ### END YOUR CODE
 
             # Update flow vector by vk
-            v += vk
+            v += vk.flatten()
 
         vx, vy = v
         flow_vectors.append([vy, vx])
@@ -147,7 +182,17 @@ def pyramid_lucas_kanade(img1, img2, keypoints,
 
     for L in range(level, -1, -1):
         ### YOUR CODE HERE
-        pass
+        pos_L = keypoints/(scale**L)
+        #H,W = pyramid1[L].shape
+        #idx = (pos_L[:,0]>H) + (pos_L[:,1]>W)
+        #idx = np.nonzero(idx)
+        #pos_L = np.delete(pos_L,idx,axis=0).reshape((-1,2))
+        d   = iterative_lucas_kanade(pyramid1[L], pyramid2[L], pos_L,
+                           window_size,
+                           num_iters,
+                           g)
+        if L > 0:
+            g = scale*(g+d)
         ### END YOUR CODE
 
     d = g + d
@@ -168,7 +213,11 @@ def compute_error(patch1, patch2):
     assert patch1.shape == patch2.shape, 'Differnt patch shapes'
     error = 0
     ### YOUR CODE HERE
-    pass
+    patch1 = (patch1-patch1.mean())/patch1.std()
+    patch2 = (patch2-patch2.mean())/patch2.std()
+    
+    error = ((patch1 - patch2)**2).mean()
+    
     ### END YOUR CODE
     return error
 
@@ -249,7 +298,22 @@ def IoU(bbox1, bbox2):
     score = 0
 
     ### YOUR CODE HERE
-    pass
+    x1_arr = np.arange(w1)+x1
+    y1_arr = np.arange(h1)+y1
+    x2_arr = np.arange(w2)+x2
+    y2_arr = np.arange(h2)+y2
+    
+    set1 = set()
+    set2 = set()
+    for i in range(h1):
+        for j in range(w1):
+            set1.add((y1_arr[i],x1_arr[j]))
+    
+    for i in range(h2):
+        for j in range(w2):
+            set2.add((y2_arr[i],x2_arr[j]))
+            
+    score = len(set1.intersection(set2))/len(set1.union(set2))
     ### END YOUR CODE
 
     return score
